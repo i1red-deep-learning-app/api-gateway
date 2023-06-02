@@ -4,6 +4,8 @@ from pydantic import BaseSettings
 from pika import BlockingConnection, ConnectionParameters, PlainCredentials
 from pika.adapters.blocking_connection import BlockingChannel
 
+from api_gateway.infrastructure.rabbit_mq.rabbit_mq_publisher import RabbitMqPublisher
+
 
 class RabbitMqSettings(BaseSettings):
     host: str
@@ -24,15 +26,16 @@ def _get_connection_parameters() -> ConnectionParameters:
     )
 
 
-_CONNECTION: Final[BlockingConnection] = BlockingConnection(_get_connection_parameters())
-_CHANNEL: Final[BlockingChannel] = _CONNECTION.channel()
+def _setup_channel(channel: BlockingChannel) -> None:
+    channel.queue_declare("create_table_dataset")
+    channel.queue_declare("create_feed_forward_network")
+    channel.queue_declare("create_training_session")
+    channel.queue_declare("start_ffn_training")
 
 
-def get_rabbit_channel() -> BlockingChannel:
-    return _CHANNEL
+_PUBLISHER: Final[RabbitMqPublisher] = RabbitMqPublisher(_get_connection_parameters(), _setup_channel)
 
 
-def declare_queues(queues: list[str]) -> None:
-    channel = get_rabbit_channel()
-    for queue in queues:
-        channel.queue_declare(queue)
+def get_rabbit_publisher() -> RabbitMqPublisher:
+    return _PUBLISHER
+

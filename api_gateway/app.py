@@ -6,13 +6,15 @@ from fastapi import FastAPI, UploadFile, Depends, Form, Body, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pika import BasicProperties
 
-from pika.adapters.blocking_connection import BlockingChannel
 from starlette import status
+from starlette.middleware.cors import CORSMiddleware
 
 from api_gateway.infrastructure.auth0.exceptions import TokenVerificationException
+from api_gateway.infrastructure.rabbit_mq.rabbit_mq_publisher import RabbitMqPublisher
+from api_gateway.setup_utils.origins import get_allowed_origins
 from api_gateway.utility.file_to_dataframe import file_to_dataframe
 from api_gateway.infrastructure.auth0.auth0_client import Auth0Client
-from api_gateway.setup_utils.rabbit_mq import get_rabbit_channel, declare_queues
+from api_gateway.setup_utils.rabbit_mq import get_rabbit_publisher
 from api_gateway.setup_utils.s3 import get_s3_uploader
 from api_gateway.infrastructure.s3.s3_uploader import S3Uploader
 from api_gateway.utility.file_type.determine_file_type import determine_file_type
@@ -22,9 +24,16 @@ from api_gateway.utility.file_type.exceptions import UnsupportedFileTypeExceptio
 
 app = FastAPI()
 
-token_auth_scheme = HTTPBearer()
 
-declare_queues(["create_table_dataset", "create_feed_forward_network", "create_training_session", "start_ffn_training"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+token_auth_scheme = HTTPBearer()
 
 
 def get_user_info(
@@ -47,7 +56,7 @@ async def create_table_dataset_view(
     label_column: str = Form(),
     user_info: Auth0UserInfo = Depends(get_user_info),
     s3_uploader: S3Uploader = Depends(get_s3_uploader),
-    channel: BlockingChannel = Depends(get_rabbit_channel),
+    publisher: RabbitMqPublisher = Depends(get_rabbit_publisher),
 ) -> None:
     file_content = await file.read()
     file_type = determine_file_type(file_content)
@@ -68,7 +77,7 @@ async def create_table_dataset_view(
     s3_uploader.upload_file(file_key, file_content)
 
     body = json.dumps({"table_dataset": {"file_key": file_key, "label_column": label_column}}).encode()
-    channel.basic_publish(
+    publisher.basic_publish(
         exchange="",
         routing_key="create_table_dataset",
         body=body,
@@ -80,10 +89,10 @@ async def create_table_dataset_view(
 async def create_feed_forward_network_view(
     feed_forward_network_json: dict = Body(),
     user_info: Auth0UserInfo = Depends(get_user_info),
-    channel: BlockingChannel = Depends(get_rabbit_channel),
+    publisher: RabbitMqPublisher = Depends(get_rabbit_publisher),
 ) -> None:
     body = json.dumps({"feed_forward_network": feed_forward_network_json}).encode()
-    channel.basic_publish(
+    publisher.basic_publish(
         exchange="",
         routing_key="create_feed_forward_network",
         body=body,
@@ -95,10 +104,10 @@ async def create_feed_forward_network_view(
 async def create_training_session_view(
     training_session_json: dict = Body(),
     user_info: Auth0UserInfo = Depends(get_user_info),
-    channel: BlockingChannel = Depends(get_rabbit_channel),
+    publisher: RabbitMqPublisher = Depends(get_rabbit_publisher),
 ) -> None:
     body = json.dumps({"training_session": training_session_json}).encode()
-    channel.basic_publish(
+    publisher.basic_publish(
         exchange="",
         routing_key="create_training_session",
         body=body,
@@ -110,10 +119,10 @@ async def create_training_session_view(
 async def start_ffn_training_view(
     start_ffn_training_json: dict = Body(),
     user_info: Auth0UserInfo = Depends(get_user_info),
-    channel: BlockingChannel = Depends(get_rabbit_channel),
+    publisher: RabbitMqPublisher = Depends(get_rabbit_publisher),
 ) -> None:
     body = json.dumps(start_ffn_training_json).encode()
-    channel.basic_publish(
+    publisher.basic_publish(
         exchange="",
         routing_key="start_ffn_training",
         body=body,
